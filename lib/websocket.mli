@@ -1,10 +1,10 @@
 module Opcode : sig
-  type standard_non_control = 
+  type standard_non_control =
     [ `Continuation
     | `Text
     | `Binary ]
 
-  type standard_control = 
+  type standard_control =
     [ `Connection_close
     | `Ping
     | `Pong ]
@@ -20,7 +20,7 @@ module Opcode : sig
   val code   : t -> int
 
   val of_code     : int -> t option
-  val of_code_exn : int -> t 
+  val of_code_exn : int -> t
 
   val to_int : t -> int
 
@@ -49,7 +49,7 @@ module Close_code : sig
   val code : t -> int
 
   val of_code     : int -> t option
-  val of_code_exn : int -> t 
+  val of_code_exn : int -> t
 
   val to_int : t -> int
 
@@ -66,8 +66,12 @@ module Frame : sig
   val opcode   : t -> Opcode.t
 
   val has_mask : t -> bool
-  val mask     : t -> int32 option
+  val mask     : t -> unit
+  val unmask   : t -> unit
+
   val mask_exn : t -> int32
+
+  val length : t -> int
 
   val payload_length : t -> int
   val with_payload   : t -> f:(Bigstring.t -> off:int -> len:int -> 'a) -> 'a
@@ -77,24 +81,33 @@ module Frame : sig
 
   val parse : t Angstrom.t
 
-  val serialize_control : Faraday.t -> opcode:Opcode.standard_control -> unit
+  val serialize_control : ?mask:int32 -> Faraday.t -> opcode:Opcode.standard_control -> unit
 
-  val schedule_serialize 
+  val schedule_serialize
     :  ?mask:int32
     -> Faraday.t
-    -> is_fin:bool 
-    -> opcode:Opcode.t 
+    -> is_fin:bool
+    -> opcode:Opcode.t
     -> payload:Bigstring.t
     -> off:int
     -> len:int
-    -> Faraday.t
     -> unit
 
   val schedule_serialize_bytes
     :  ?mask:int32
     -> Faraday.t
-    -> is_fin:bool 
-    -> opcode:Opcode.t 
+    -> is_fin:bool
+    -> opcode:Opcode.t
+    -> payload:Bytes.t
+    -> off:int
+    -> len:int
+    -> unit
+
+  val serialize_bytes
+    :  ?mask:int32
+    -> Faraday.t
+    -> is_fin:bool
+    -> opcode:Opcode.t
     -> payload:Bytes.t
     -> off:int
     -> len:int

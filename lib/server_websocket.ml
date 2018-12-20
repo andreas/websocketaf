@@ -5,18 +5,10 @@ type t =
   ; wsd    : Wsd.t }
 type input_handlers =
   { frame : opcode:Websocket.Opcode.t -> is_fin:bool -> Bigstring.t -> off:int -> len:int -> unit
-  ; eof   : unit                                                                          -> unit }
-
-let random_string init =
-  begin match init with
-  | Some init -> Random.init init
-  | None -> Random.self_init ()
-  end;
-  fun () ->
-    Random.int32 Int32.max_int
+  ; eof   : unit                                                                   -> unit }
 
 let create ~websocket_handler =
-  let mode         = `Client (random_string None) in
+  let mode         = `Server in
   let wsd          = Wsd.create mode in
   let { frame; _ } = websocket_handler wsd in
   { reader = Reader.create frame

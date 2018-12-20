@@ -1,23 +1,13 @@
 module IOVec = Httpaf.IOVec
 
-type t 
+type t
 
-type error =
-  [ Httpaf.Client_connection.error
-  | `Handshake_failure of Httpaf.Response.t * [`read] Httpaf.Body.t ]
-
-type input_handlers = Client_websocket.input_handlers = 
+type input_handlers =
   { frame : opcode:Websocket.Opcode.t -> is_fin:bool -> Bigstring.t -> off:int -> len:int -> unit
-  ; eof   : unit                                                                          -> unit }
+  ; eof   : unit                                                                   -> unit }
 
-val create 
-  :  nonce             : string
-  -> host              : string
-  -> port              : int
-  -> resource          : string
-  -> sha1              : (string -> string)
-  -> error_handler     : (error -> unit)
-  -> websocket_handler : (Wsd.t -> input_handlers)
+val create
+  :  websocket_handler : (Wsd.t -> input_handlers)
   -> t
 
 val next_read_operation  : t -> [ `Read | `Yield | `Close ]

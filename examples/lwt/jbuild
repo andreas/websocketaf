@@ -1,0 +1,5 @@
+(jbuild_version 1)
+
+(executables
+ ((names (wscat echo_server))
+  (libraries (websocketaf websocketaf-lwt lwt lwt.unix))))

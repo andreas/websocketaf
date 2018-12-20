@@ -1,0 +1,9 @@
+(executable
+ (libraries websocketaf alcotest)
+ (name test))
+
+(alias
+ (name runtest)
+ (package websocketaf)
+ (deps (:test test.exe))
+ (action (run %{test} -v)))
