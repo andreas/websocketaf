@@ -1,101 +1,42 @@
-module IOVec = Httpaf.IOVec
-
-type 'handle state =
-  | Uninitialized
-  | Handshake of 'handle Server_handshake.t
-  | Websocket of Server_websocket.t
-
-type 'handle t = 'handle state ref
-
-type input_handlers = Server_websocket.input_handlers =
+type input_handlers =
   { frame : opcode:Websocket.Opcode.t -> is_fin:bool -> Bigstring.t -> off:int -> len:int -> unit
   ; eof   : unit                                                                          -> unit }
 
 let passes_scrutiny _headers =
   true
 
-let create ~sha1 ~websocket_handler =
-  let t = ref Uninitialized in
-  let request_handler reqd =
-    let request = Httpaf.Reqd.request reqd in
-    if passes_scrutiny request.headers then begin
-      let key = Httpaf.Headers.get_exn request.headers "sec-websocket-key" in
-      let accept = sha1 (key ^ "258EAFA5-E914-47DA-95CA-C5AB0DC85B11") in
-      let headers = Httpaf.Headers.of_list [
-        "transfer-encoding",    "chunked";
-        "upgrade",              "websocket";
-        "connection",           "upgrade";
-        "sec-websocket-accept", accept
-      ] in
-      let response = Httpaf.(Response.create ~headers `OK) in
-      let body = Httpaf.Reqd.respond_with_streaming reqd response in
-      Httpaf.Body.write_string body "foo";
-      Httpaf.Body.flush body (fun () ->
-        t := Websocket (Server_websocket.create ~websocket_handler);
-        Httpaf.Body.close_writer body
+let handle ~mode ~read_body ~write_body ~websocket_handler =
+  let wsd = Wsd.create mode write_body in
+  let { frame; eof = _ } = websocket_handler wsd in
+  let reader = Reader.create frame in
+  let rec schedule_read () =
+    Httpaf.Body.schedule_read read_body
+      ~on_eof:(fun () ->
+        Printf.printf "on_eof\n"; flush stdout;
+        (*
+        Reader.read reader `Eof;
+        eof ()
+        *)
       )
-    end
+      ~on_read:(fun bigstring ~off ~len ->
+        Printf.printf "on_read\n"; flush stdout;
+        Reader.read_bigstring reader bigstring ~off ~len;
+        schedule_read ()
+      )
   in
-  let handshake =
-    Server_handshake.create
-      ~request_handler
-  in
-  t := Handshake handshake;
-  t
-;;
+  schedule_read ()
 
-let next_read_operation t =
-  match !t with
-  | Uninitialized       -> assert false
-  | Handshake handshake -> Server_handshake.next_read_operation handshake
-  | Websocket websocket -> Server_websocket.next_read_operation websocket
-;;
-
-let read t bs ~off ~len =
-  match !t with
-  | Uninitialized       -> assert false
-  | Handshake handshake -> Format.printf "read handshake\n"; flush stdout; Server_handshake.read handshake bs ~off ~len
-  | Websocket websocket -> Format.printf "read websocket\n"; flush stdout; Server_websocket.read websocket bs ~off ~len
-;;
-
-let read_eof t bs ~off ~len =
-  match !t with
-  | Uninitialized       -> assert false
-  | Handshake handshake -> Server_handshake.read_eof handshake bs ~off ~len
-  | Websocket websocket -> Server_websocket.read_eof websocket bs ~off ~len
-;;
-
-let yield_reader t f =
-  match !t with
-  | Uninitialized       -> assert false
-  | Handshake handshake -> Server_handshake.yield_reader handshake f
-  | Websocket websocket -> Server_websocket.yield_reader websocket f
-;;
-
-let next_write_operation t =
-  match !t with
-  | Uninitialized       -> assert false
-  | Handshake handshake -> Format.printf "next write op handshake\n"; flush stdout; Server_handshake.next_write_operation handshake
-  | Websocket websocket -> Format.printf "next write op websocket\n"; flush stdout; Server_websocket.next_write_operation websocket
-;;
-
-let report_write_result t result =
-  match !t with
-  | Uninitialized       -> assert false
-  | Handshake handshake -> Server_handshake.report_write_result handshake result
-  | Websocket websocket -> Server_websocket.report_write_result websocket result
-;;
-
-let yield_writer t f =
-  match !t with
-  | Uninitialized       -> assert false
-  | Handshake handshake -> Server_handshake.yield_writer handshake f
-  | Websocket websocket -> Server_websocket.yield_writer websocket f
-;;
-
-let close t =
-  match !t with
-  | Uninitialized       -> assert false
-  | Handshake handshake -> Server_handshake.close handshake
-  | Websocket websocket -> Server_websocket.close websocket
-;;
+let upgrade_connection ~sha1 ~websocket_handler reqd =
+  let request = Httpaf.Reqd.request reqd in
+  if passes_scrutiny request.headers then begin
+    let key = Httpaf.Headers.get_exn request.headers "sec-websocket-key" in
+    let accept = sha1 (key ^ "258EAFA5-E914-47DA-95CA-C5AB0DC85B11") in
+    let headers = Httpaf.Headers.of_list [
+      "content-length", "3";
+      "sec-websocket-accept", accept
+    ] in
+    let response = Httpaf.Response.create ~headers `OK in
+    let write_body = Httpaf.Reqd.respond_with_streaming reqd response in
+    let read_body = Httpaf.Reqd.request_body reqd in
+    handle ~mode:`Server ~read_body ~write_body ~websocket_handler
+  end

@@ -1,5 +1,3 @@
-module IOVec = Httpaf.IOVec
-
 type mode =
   [ `Client of unit -> int32
   | `Server
@@ -9,6 +7,7 @@ type t
 
 val create
   : mode
+  -> [`write] Httpaf.Body.t
   -> t
 
 val schedule
@@ -33,9 +32,4 @@ val send_pong : t -> unit
 val flushed : t -> (unit -> unit) -> unit
 val close   : t -> unit
 
-val next : t -> [ `Write of Bigstring.t IOVec.t list | `Yield | `Close of int ]
-val report_result : t -> [`Ok of int | `Closed ] -> unit
-
 val is_closed : t -> bool
-
-val when_ready_to_write : t -> (unit -> unit) -> unit

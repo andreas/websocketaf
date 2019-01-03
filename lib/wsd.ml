@@ -8,15 +8,13 @@ type mode =
 type t =
   { faraday : Faraday.t
   ; mode : mode
-  ; mutable when_ready_to_write : unit -> unit
+  ; response_body : [`write] Httpaf.Body.t
   }
 
-let default_ready_to_write = Sys.opaque_identity (fun () -> ())
-
-let create (mode : mode) =
-  { faraday = Faraday.create 0x1000
+let create mode response_body =
+  { faraday = Faraday.create 14
   ; mode
-  ; when_ready_to_write = default_ready_to_write;
+  ; response_body
   }
 
 let mask t =
@@ -24,10 +22,18 @@ let mask t =
   | `Client mask -> Some (mask ())
   | `Server -> None
 
-let ready_to_write t =
-  let callback = t.when_ready_to_write in
-  t.when_ready_to_write <- default_ready_to_write;
-  callback ()
+let rec ready_to_write t =
+  match Faraday.operation t.faraday with
+  | `Yield ->
+    ()
+  | `Close ->
+    Httpaf.Body.close_writer t.response_body
+  | `Writev [] -> assert false    
+  | `Writev (iovec::_) ->
+    let { IOVec.buffer; off; len } = iovec in
+    Httpaf.Body.schedule_bigstring t.response_body buffer ~off ~len;
+    Faraday.shift t.faraday len;
+    ready_to_write t
 
 let schedule t ~kind:(kind : [`Text | `Binary]) payload ~off ~len =
   let mask = mask t in
@@ -47,30 +53,14 @@ let send_pong t =
   Websocket.Frame.serialize_control t.faraday ~opcode:`Pong;
   ready_to_write t
 
-let flushed t f = Faraday.flush t.faraday f
+let flushed t f =
+  Faraday.flush t.faraday f;
+  ready_to_write t
 
 let close t =
   Websocket.Frame.serialize_control t.faraday ~opcode:`Connection_close;
   Faraday.close t.faraday;
   ready_to_write t
 
-let next t =
-  match Faraday.operation t.faraday with
-  | `Close         -> `Close 0
-  | `Yield         -> `Yield
-  | `Writev iovecs -> `Write iovecs
-
-let report_result t result =
-  match result with
-  | `Closed -> close t
-  | `Ok len -> Faraday.shift t.faraday len
-
 let is_closed t =
   Faraday.is_closed t.faraday
-
-let when_ready_to_write t callback =
-  if not (t.when_ready_to_write == default_ready_to_write)
-  then failwith "Wsd.when_ready_to_write: only one callback can be registered at a time"
-  else if is_closed t
-  then callback ()
-  else t.when_ready_to_write <- callback

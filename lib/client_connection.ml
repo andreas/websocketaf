@@ -1,17 +1,8 @@
-module IOVec = Httpaf.IOVec
-
-type state =
-  | Uninitialized
-  | Handshake of Client_handshake.t
-  | Websocket of Client_websocket.t
-
-type t = state ref
-
 type error =
   [ Httpaf.Client_connection.error
   | `Handshake_failure of Httpaf.Response.t * [`read] Httpaf.Body.t ]
 
-type input_handlers = Client_websocket.input_handlers =
+type input_handlers =
   { frame : opcode:Websocket.Opcode.t -> is_fin:bool -> Bigstring.t -> off:int -> len:int -> unit
   ; eof   : unit                                                                          -> unit }
 
@@ -28,99 +19,67 @@ let passes_scrutiny ~accept headers =
      | Some connection -> String.lowercase_ascii connection = "upgrade")
 ;;
 
-let create 
+let random_string init =
+  begin match init with
+  | Some init -> Random.init init
+  | None -> Random.self_init ()
+  end;
+  fun () ->
+    Random.int32 Int32.max_int
+;;
+
+let handle ~mode ~read_body ~write_body ~websocket_handler =
+  let wsd = Wsd.create mode write_body in
+  let { frame; eof } = websocket_handler wsd in
+  let reader = Reader.create frame in
+  let rec schedule_read () =
+    Httpaf.Body.schedule_read read_body
+      ~on_eof:(fun () ->
+        Reader.read reader `Eof;
+        eof ()
+      )
+      ~on_read:(fun bigstring ~off ~len ->
+        Reader.read_bigstring reader bigstring ~off ~len;
+        schedule_read ()
+      )
+  in
+  schedule_read ()
+;;
+
+let connect 
     ~nonce 
     ~host 
     ~port 
     ~resource
     ~sha1
-    ~error_handler
+    ~error_handler:(error_handler : error -> unit)
     ~websocket_handler
   =
-  let t = ref Uninitialized in
+  let request_body = ref None in
   let nonce = B64.encode nonce in
   let response_handler (response : Httpaf.Response.t) response_body =
     let accept = sha1 (nonce ^ "258EAFA5-E914-47DA-95CA-C5AB0DC85B11") in
     match response.status with
     | `Switching_protocols when passes_scrutiny ~accept response.headers ->
-      Httpaf.Body.close_reader response_body;
-      let handshake =
-        match !t with
-        | Handshake h -> h
-        | Uninitialized
-        | Websocket _ -> assert false
-      in
-      t := Websocket (Client_websocket.create ~websocket_handler);
-      Client_handshake.close handshake
+      let mode = `Client (random_string None) in
+      let write_body = match !request_body with Some b -> b | None -> assert false in
+      handle ~mode ~read_body:response_body ~write_body ~websocket_handler
     | _                    ->
       error_handler (`Handshake_failure(response, response_body))
   in
-  let handshake = 
+  let headers =
+    [ "upgrade"              , "websocket"
+    ; "connection"           , "upgrade"
+    ; "host"                 , String.concat ":" [ host; string_of_int port ]
+    ; "sec-websocket-version", "13" 
+    ; "sec-websocket-key"    , nonce
+    ] |> Httpaf.Headers.of_list
+  in
+  let body, _connection =
     let error_handler = (error_handler :> Httpaf.Client_connection.error_handler) in
-    Client_handshake.create
-      ~nonce
-      ~host
-      ~port
-      ~resource
+    Httpaf.Client_connection.request
+      (Httpaf.Request.create ~headers `GET resource)
       ~error_handler
       ~response_handler
   in
-  t := Handshake handshake;
-  t
-;;
-
-let next_read_operation t =
-  match !t with
-  | Uninitialized       -> assert false
-  | Handshake handshake -> Client_handshake.next_read_operation handshake
-  | Websocket websocket -> Client_websocket.next_read_operation websocket
-;;
-
-let read t bs ~off ~len =
-  match !t with
-  | Uninitialized       -> assert false
-  | Handshake handshake -> Client_handshake.read handshake bs ~off ~len
-  | Websocket websocket -> Client_websocket.read websocket bs ~off ~len
-;;
-
-let read_eof t bs ~off ~len =
-  match !t with
-  | Uninitialized       -> assert false
-  | Handshake handshake -> Client_handshake.read handshake bs ~off ~len
-  | Websocket websocket -> Client_websocket.read_eof websocket bs ~off ~len
-;;
-
-let yield_reader t f =
-  match !t with
-  | Uninitialized       -> assert false
-  | Handshake _handshake -> f () (*Client_handshake.yield_reader handshake f *)
-  | Websocket websocket -> Client_websocket.yield_reader websocket f
-;;
-
-let next_write_operation t =
-  match !t with
-  | Uninitialized       -> assert false
-  | Handshake handshake -> Client_handshake.next_write_operation handshake
-  | Websocket websocket -> Client_websocket.next_write_operation websocket
-;;
-
-let report_write_result t result =
-  match !t with
-  | Uninitialized       -> assert false
-  | Handshake handshake -> Client_handshake.report_write_result handshake result
-  | Websocket websocket -> Client_websocket.report_write_result websocket result
-;;
-
-let yield_writer t f =
-  match !t with
-  | Uninitialized       -> assert false
-  | Handshake handshake -> Client_handshake.yield_writer handshake f 
-  | Websocket websocket -> Client_websocket.yield_writer websocket f 
-;;
-
-let close t =
-  match !t with
-  | Uninitialized       -> assert false
-  | Handshake _handshake -> () (*Client_handshake.close handshake*)
-  | Websocket websocket -> Client_websocket.close websocket
-;;
+  request_body := Some body

@@ -1,0 +1,3 @@
+(executables
+ (names wscat echo_server)
+ (libraries httpaf-lwt websocketaf lwt lwt.unix digestif.ocaml base64))

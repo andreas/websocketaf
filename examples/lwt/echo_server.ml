@@ -5,13 +5,13 @@ let connection_handler : Unix.sockaddr -> Lwt_unix.file_descr -> unit Lwt.t =
   let module Response = Httpaf.Response in
   let module Status = Httpaf.Status in
 
-  let websocket_handler _ wsd =
+  let websocket_handler wsd =
     let frame ~opcode ~is_fin:_ bs ~off ~len =
       match opcode with
       | `Continuation
       | `Text
       | `Binary ->
-        Format.printf "ECHOING: %s\n" (Bigstringaf.sub bs ~off ~len |> Httpaf.Bigstring.to_string); flush stdout;
+        Printf.printf "ECHOING: %s\n" (Bigstringaf.sub bs ~off ~len |> Httpaf.Bigstring.to_string); flush stdout;
         Websocketaf.Wsd.schedule wsd bs ~kind:`Text ~off ~len
       | `Connection_close ->
         Websocketaf.Wsd.close wsd
@@ -22,7 +22,7 @@ let connection_handler : Unix.sockaddr -> Lwt_unix.file_descr -> unit Lwt.t =
         ()
     in
     let eof () =
-      Format.printf "EOF\n"
+      Printf.printf "websocket handler EOF\n"; flush stdout
     in
     { Websocketaf.Server_connection.frame
     ; eof
@@ -34,17 +34,34 @@ let connection_handler : Unix.sockaddr -> Lwt_unix.file_descr -> unit Lwt.t =
 
     begin match error with
     | `Exn exn ->
-      Body.write_string response_body (Printexc.to_string exn);
-      Body.write_string response_body "\n";
+      Printf.printf "Exn: %s\n" (Printexc.to_string exn);
+      flush stdout
 
     | #Status.standard as error ->
-      Body.write_string response_body (Status.default_reason_phrase error)
+      Printf.printf "Standard error: %s\n" (Status.default_reason_phrase error);
+      flush stdout
     end;
+
+    Body.close_writer response_body
   in
 
-  Websocketaf_lwt.Server.create_connection_handler
+  let sha1 s =
+    s
+    |> Digestif.SHA1.digest_string
+    |> Digestif.SHA1.to_raw_string
+    |> B64.encode ~pad:true
+  in
+
+  let request_handler _fd reqd =
+    Websocketaf.Server_connection.upgrade_connection
+      ~sha1
+      ~websocket_handler
+      reqd
+  in
+
+  Httpaf_lwt.Server.create_connection_handler
     ?config:None
-    ~websocket_handler
+    ~request_handler
     ~error_handler
 
 
