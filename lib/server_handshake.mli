@@ -33,20 +33,20 @@
 
 module IOVec = Httpaf.IOVec
 
-type 'handle t
+type t
 
 val create
-  :  request_handler : 'handle Httpaf.Server_connection.request_handler
-  -> 'handle t
+  :  request_handler : Httpaf.Server_connection.request_handler
+  -> t
 
-val next_read_operation  : _ t -> [ `Read | `Close | `Yield ]
-val next_write_operation : _ t -> [ `Write of Bigstringaf.t IOVec.t list | `Yield | `Close of int ]
+val next_read_operation  : t -> [ `Read | `Close | `Upgrade | `Yield ]
+val next_write_operation : t -> [ `Write of Bigstringaf.t IOVec.t list | `Upgrade of Httpaf.Request.t * Httpaf.Response.t | `Yield | `Close of int ]
 
-val read : _ t -> Bigstringaf.t -> off:int -> len:int -> int
-val read_eof : _ t -> Bigstringaf.t -> off:int -> len:int -> int
-val report_write_result : _ t -> [`Ok of int | `Closed ] -> unit
+val read : t -> Bigstringaf.t -> off:int -> len:int -> int
+val read_eof : t -> Bigstringaf.t -> off:int -> len:int -> int
+val report_write_result : t -> [`Ok of int | `Closed ] -> unit
 
-val yield_reader : _ t -> (unit -> unit) -> unit
-val yield_writer : _ t -> (unit -> unit) -> unit
+val yield_reader : t -> (unit -> unit) -> unit
+val yield_writer : t -> (unit -> unit) -> unit
 
-val close : _ t -> unit
+val close : t -> unit

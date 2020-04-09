@@ -33,8 +33,8 @@
 
 module IOVec = Httpaf.IOVec
 
-type 'handle t =
-  { connection : 'handle Httpaf.Server_connection.t
+type t =
+  { connection : Httpaf.Server_connection.t
   }
 
 let create
